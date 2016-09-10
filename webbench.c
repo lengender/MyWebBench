@@ -98,6 +98,136 @@ static void usage(void)
 }
 
 void benchcore(const char *host, const int port, const int *req);
+
+int main(int argc, char *argv[])
+{
+    int opt = 0;
+    int options_index = 0;
+    char *tmp = NULL;
+
+    if(argc == 1)
+    {
+        usage();
+        return 2;
+    }
+
+    //参数解析，参见　man getopt_long
+    while((opt = getopt_long(argc, argv, "912Vfrt:p:c:?h", long_options, &options_index)) != EOF)
+    {
+        switch(opt)
+        {
+            case 0: break;
+            case 'f':   
+                force = 1;  
+                break;
+            case 'r':
+                force_reload = 1;
+                break;
+            case '9':
+                http10 = 0;
+                break;
+            case '1':
+                http10 = 1;
+                break;
+            case '2':
+                http10 = 2;
+                break;
+            case 'V':
+                printf(PROGRAM_VERSION"\n");
+                exit(0);
+            case 't':
+                benchtime = atoi(optarg);
+                break;
+            case 'p':
+                //proxy server parsing server:port
+                tmp = strrchr(optarg, ':');
+                proxyhost = optarg;
+                if(tmp == NULL)
+                    break;
+                if(tmp == optarg)
+                {
+                    fprintf(stderr, "Error in option --proxy %s: Missing hostname.\n", optarg);
+                    break;
+                }
+                if(tmp == optarg + strlen(optarg) - 1)
+                {
+                    fprintf(stderr, "Error in option --proxy %s Port number is missing.\n", optarg);
+                    return 2;
+                }
+                *tmp = '\0';
+                proxyport = atoi(tmp + 1); 
+                break;
+            case ':':
+            case 'h':
+            case '?':   
+                usage();
+                return 2;
+				break;
+            case 'c':
+                clients = atoi(optarg);
+                break;
+        }
+    }
+    
+    //optind被getopt_long设置为命令行参数中为读取的下一个元素下标值
+    if(optind == argc)
+    {
+        fprintf(stderr, "webbench: Missing URL!\n");
+        usage();
+        return 2;
+    }
+
+    //不能指定客户端数和请求时间为０
+    if(clients == 0)
+        clients = 1;
+    if(benchtime == 0)  
+        benchtime = 60;
+
+    //Copyright
+    fprintf(stderr, "Webbench - Simple Web Benchmark "PROGRAM_VERSION"\n"
+           "Copyright(c) Radim Kolar 1997-2004, GPL Open Source SoftWare.\n");
+
+    //最后一个参数被视为URL
+    build_request(argv[optind]);
+    
+    //输出测试信息
+    printf("\nBenchmarking: ");
+    switch(method)
+    {
+        case METHOD_GET:
+        default:
+            printf("GET"); break;
+        case METHOD_OPTIONS:
+            printf("OPTIONS"); break;
+        case METHOD_TRACE:
+            printf("TRACE"); break;
+        case METHOD_HEAD:
+            printf("HEAD"); break;
+    }
+    printf("  %s", argv[optind]);
+
+    switch(http10)
+    {
+        case 0: printf(" (using HTTP/0.9)"); break;
+        case 2: printf(" (using HTTP/1.1)"); break;
+    }
+    printf("\n");
+
+    printf("%d clients", clients);
+    printf(", running %d sec", benchtime);
+
+    if(force)  
+        printf(", early socket close");
+    if(proxyhost != NULL)
+        printf(", via proxy server %s: %d", proxyhost, proxyport);
+    if(force_reload)
+        printf(", forcing reload");
+    printf(".\n");
+
+    //开始压力测试，返回bench函数返回结果
+    return bench();
+}
+
 //根据URL，生成HTTP头
 void build_request(const char *url)
 {
@@ -218,7 +348,7 @@ static int bench(void)
     }
     close(i);
 
-    if(pipe(mypipe) < 0) //创建管道
+    if(pipe(mypipe)) //创建管道
     {
         perror("pipe failed.");
         return 3;
@@ -242,7 +372,7 @@ static int bench(void)
         return 3;
     }
 
-    if(pid == 0)
+    if(pid == (pid_t)0)
     {
         //子进程
         if(proxyhost == NULL)
@@ -287,9 +417,9 @@ static int bench(void)
             speed += i;
             failed += j;
             bytes += k;
-            if(--clients == 0) break;
+            if(--clients <= 0) break;
         }
-
+        fclose(f);
         //输出测试结果
         printf("\nSpeed = %d pages/min, %d bytes/sec.\nRequest: %d succeed, %d failed.\n",
               (int)((speed + failed) / (benchtime / 60.0f)),
@@ -316,8 +446,7 @@ void benchcore(const char *host, const int port, const int *req)
 
     rlen = strlen(req);
     
-    nexttry:
-    while(1)
+    nexttry:while(1)
     {        
         if(timerexpired) //定时器到时后，会设定timerexpired=1,函数就会返回
         {
@@ -340,6 +469,15 @@ void benchcore(const char *host, const int port, const int *req)
             continue;
         }
 
+		if(http10 == 0)
+		{
+			if(shutdown(s, 1))
+			{
+				failed++;
+				close(s);
+				continue;
+			}
+		}
         if(force == 0) //force 等于０表示要读取http请求数据
         {
             while(1)
@@ -369,132 +507,4 @@ void benchcore(const char *host, const int port, const int *req)
         }
         speed++;  //http测试成功一次，speed加１
     }
-}
-
-int main(int argc, char *argv[])
-{
-    int opt = 0;
-    int options_index = 0;
-    char *tmp = NULL;
-
-    if(argc == 1)
-    {
-        usage();
-        return 2;
-    }
-
-    //参数解析，参见　man getopt_long
-    while((opt = getopt_long(argc, argv, "912Vfrt:p:c:?h", long_options, &options_index)) != EOF)
-    {
-        switch(opt)
-        {
-            case 0: break;
-            case 'f':   
-                force = 1;  
-                break;
-            case 'r':
-                force_reload = 1;
-                break;
-            case '9':
-                http10 = 0;
-                break;
-            case '1':
-                http10 = 1;
-                break;
-            case '2':
-                http10 = 2;
-                break;
-            case 'V':
-                printf(PROGRAM_VERSION"\n");
-                exit(0);
-            case 't':
-                benchtime = atoi(optarg);
-                break;
-            case 'p':
-                //proxy server parsing server:port
-                tmp = strrchr(optarg, ':');
-                proxyhost = optarg;
-                if(tmp == NULL)
-                    break;
-                if(tmp == optarg)
-                {
-                    fprintf(stderr, "Error in option --proxy %s: Missing hostname.\n", optarg);
-                    break;
-                }
-                if(tmp == optarg + strlen(optarg) - 1)
-                {
-                    fprintf(stderr, "Error in option --proxy %s Port number is missing.\n", optarg);
-                    return 2;
-                }
-                *tmp = '\0';
-                proxyport = atoi(tmp + 1); 
-                break;
-            case ':':
-            case 'h':
-            case '?':   
-                usage();
-                return 2;
-            case 'c':
-                clients = atoi(optarg);
-                break;
-        }
-    }
-    
-    //optind被getopt_long设置为命令行参数中为读取的下一个元素下标值
-    if(optind == argc)
-    {
-        fprintf(stderr, "webbench: Missing URL!\n");
-        usage();
-        return 2;
-    }
-
-    //不能指定客户端数和请求时间为０
-    if(clients == 0)
-        clients = 1;
-    if(benchtime == 0)  
-        benchtime = 60;
-
-    //Copyright
-    fprintf(stderr, "Webbench - Simple Web Benchmark "PROGRAM_VERSION"\n"
-           "Copyright(c) Radim Kolar 1997-2004, GPL Open Source SoftWare.\n");
-
-    //最后一个参数被视为URL
-    build_request(argv[optind]);
-    
-    //输出测试信息
-    printf("\nBenchmarking: ");
-    switch(method)
-    {
-        case METHOD_GET:
-        default:
-            printf("GET"); break;
-        case METHOD_OPTIONS:
-            printf("OPTIONS"); break;
-        case METHOD_TRACE:
-            printf("TRACE"); break;
-        case METHOD_HEAD:
-            printf("HEAD"); break;
-    }
-    printf("  %s", argv[optind]);
-
-    switch(http10)
-    {
-        case 0: printf(" (using HTTP/0.9)"); break;
-        case 2: printf(" (using HTTP/1.1)"); break;
-    }
-    printf("\n");
-
-    printf("%d clients", clients);
-    printf(", running %d sec", benchtime);
-
-    if(force)  
-        printf(", early socket close");
-    if(proxyhost != NULL)
-        printf(", via proxy server %s: %d", proxyhost, proxyport);
-    if(force_reload)
-        printf(", forcing reload");
-    printf(".\n");
-
-    //开始压力测试，返回bench函数返回结果
-    return bench();
 }
