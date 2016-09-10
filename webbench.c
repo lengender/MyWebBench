@@ -97,7 +97,10 @@ static void usage(void)
            );
 }
 
+void build_request(const char *url);
 void benchcore(const char *host, const int port, const int *req);
+static int bench(void);
+
 
 int main(int argc, char *argv[])
 {
@@ -279,7 +282,7 @@ void build_request(const char *url)
     }
 
     //找到主机名开始的地方, i 指向url中http://下一个位置
-    i = strstr(url, "http://") - url + 3;
+    i = strstr(url, "://") - url + 3;
 
     if(strchr(url + i, '/') == NULL)
     {
